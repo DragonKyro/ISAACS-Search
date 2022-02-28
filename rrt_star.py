@@ -18,10 +18,12 @@ RRT = rapidly exploring random tree
 import numpy as np
 from random import random
 from collections import deque
+from mavros_drone import MavrosDrone
 import ipympl
 import haversine as hs
 import scipy.io
 import pickle
+import math
 
 def RRT_star(startpos, endpos, obstacles, n_iter, radius, stepSize, matGrid):
     ''' RRT star algorithm '''
@@ -238,7 +240,7 @@ def smoothPath(path, obstacles):
       rightPointer += 1
   return path
 
-def getWaypoints(start, end, obstaclesFile):
+def getPath(start, end, obstaclesFile):
     startpos = start
     endpos = end
     mat = scipy.io.loadmat(obstaclesFile)
@@ -256,3 +258,35 @@ def getWaypoints(start, end, obstaclesFile):
         print(path)
     else:
         print("No path")
+    return path
+
+def getLatLong(oldLat, oldLong, dx, dy):
+    # Returns the new latitude and longitude from offseting dx and dy meters from the old latitude and longitude
+    # Radius of the earth is approximately 6371007 m
+    # number of km per degree = ~111km (111.32 in google maps, but range varies
+    # between 110.567km at the equator and 111.699km at the poles)
+    # 1km in degree = 1 / 111.32km = 0.0089
+    # 1m in degree = 0.0089 / 1000 = 0.0000089
+    degreeOffset = dy * 0.0000089;
+    newLat = oldLat + degreeOffset
+    # pi / 180 = 0.018
+    newLong = oldLong + degreeOffset / math.cos(oldLat * 0.018)
+    trueDist = math.sqrt(dx ** 2 + dy ** 2)
+    haversineDist = hs.haversine((oldLat, oldLong), (newLat, newLong)) * 1000
+    return (newLat, newLong)
+
+def path_to_waypoint(path):
+    wp = []
+    for node in path:
+        xLat, yLat = getLatLong(37.8719, -122.2585, node[0], node[1])
+        new_waypoint = {'frame': MavrosDrone.FRAME_REFERENCE.RELATIVE_ALT.value,
+                            'command': MavrosDrone.MAV_CMD.NAVIGATE_TO_WAYPOINT.value,
+                            'is_current': False, 'autocontinue': True, 'param1': 0,
+                            'param2': 0, 'param3': 0, 'x_lat': xLat,
+                            'y_long': yLat,
+                            'z_alt': node[2]}
+        wp.append(new_waypoint)
+    return wp
+
+def getMavrosWaypoints(start, end, obstaclesFile):
+    return path_to_waypoint(getPath(start, end, obstaclesFile))
